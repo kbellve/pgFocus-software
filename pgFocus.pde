@@ -5,16 +5,20 @@ import processing.serial.*;
 // Biomedical Imaging Group
 
 static int REGRESSIONPOINTS = 31;
-static float MAX_DAU = 16383;
+static float MAX_DAU = 16384;
 static float MAX_VOLT = 5;
 static float MIN_VOLT = -5;
 static int MICRONPERVOLT = 10;
-static int DAUPERVOLT = 1241;
+static int DAUPERVOLT = 1638; // 14bit over 10V
+//static int DAUPERVOLT = 1241; // 12bit over 3.3V
+static int ADC_TRIGGER = 5;
+
 
 String[] light,stats,cal; 
 float fExposure, fFocus,fSlope,fIntercept,fResiduals,fDAU;
 float[][] fRegressionPoints = new float [REGRESSIONPOINTS][2];
 float[] focusPoints = new float[30];
+int diffADC = 0;
 int focusPointsIndex = 0;
 int focusPointsMax = 0;
 int regressionPoints = 0;
@@ -28,11 +32,7 @@ boolean bVerbose = false;
 boolean bFocus = false;
 Boolean clearGUI = true;    
 
-
-
 GButton guiFocus,guiDown,guiUp;
-
-
 
 void setup() {
   size(800,600);
@@ -51,7 +51,7 @@ void setup() {
  
   kiwi = loadImage("kiwi.png");
   
-  textSize(14);
+  textSize(12);
   
   
   background(255);
@@ -135,7 +135,7 @@ void help() {
   image(kiwi,20,550,60,45.7);
   
   
-  textSize(14);
+  textSize(12);
 
 }
 
@@ -177,7 +177,7 @@ void draw() {
   if (nKey == 2) {
     strokeWeight(2);
     
-    if (stats != null && stats.length == 9) {
+    if (stats != null && stats.length == 11) {
       //println (stats);
       fill(255);
       noStroke();
@@ -198,28 +198,29 @@ void draw() {
       if (stats[6] != null) {
         stroke(0,0,255);
         fill(0,0,255);
+
         fFocus = float(stats[6]);
         focusPoints[focusPointsIndex++] = fFocus;
         if (focusPointsMax < 30) focusPointsMax++;
         if (focusPointsIndex == 30) focusPointsIndex = 0;
                
-        fFocus = map(fFocus,30,90,10,height-10);
+        fFocus = map(fFocus,20,108,10,height-10);
         
         textAlign(RIGHT,BOTTOM);
         text(str(truncate(float(stats[6]))),xPos + textWidth(str(truncate(float(stats[6]))))+ 5,height - fFocus );
         textAlign(LEFT,BOTTOM);
-        text("Focus: " ,5,80);
-        text(str(truncate(float(stats[6]))),50,80);
+        text("Focus: " ,5,60);
+        text(str(truncate(float(stats[6]))),50,60);
         
         
       //}
       
       //if (stats[7] != null) {
-        float fSD = (standard_deviation(focusPoints,focusPointsMax) * 1000 * fDAU/DAUPERVOLT ) * MICRONPERVOLT;
-        float sd = constrain(fSD,0,500);
-        stroke(200,200,255);
-        sd = map(sd,0,500,1,height);
-        //point(xPos,constrain(height-sd,10, height-10));
+        float fSD = (standard_deviation(focusPoints,focusPointsMax) * fDAU/DAUPERVOLT ) * MICRONPERVOLT * 1000; // convert to nanometers from DAU
+        float sd = log(fSD);
+        if (abs(diffADC) > ADC_TRIGGER || bFocus == false) stroke(160,160,215);
+        else stroke(200,200,255);
+        sd = map(sd,0,50,1,height/2);
         line(xPos,height-fFocus+sd,xPos,height-fFocus-sd);
         stroke(0,0,255);
         point(xPos,height - fFocus);
@@ -265,10 +266,10 @@ void draw() {
         int sVoltage = int(map(truncate(Voltage),-5,+5,1,height));
         point(xPos,height - sVoltage);
         textAlign(RIGHT,BOTTOM);
-        text(str(truncate(Voltage)),xPos + textWidth(str(truncate(Voltage))) + 5,height - sVoltage);  
+        text(str(int(Voltage * MICRONPERVOLT * 1000)),xPos + textWidth(str(int(Voltage * MICRONPERVOLT * 1000))) + 5,height - sVoltage);  // * 1000 to convert to nM
         textAlign(LEFT,BOTTOM);
-        text("Volts: ",5,60);
-        text(str(truncate(Voltage)),50,60);
+        text("D/A: ",5,80);
+        text(str(int(Voltage * MICRONPERVOLT * 1000)),50,80); // * 1000 to convert to nM
       }
       
       
@@ -289,6 +290,25 @@ void draw() {
         text("Exp: ",5,120);
         text(stats[8],50,120);
       } 
+      
+      if (stats[9] != null) {        
+        stroke(128,128,128);
+        fill(128,128,128);
+        float fCurrentADC = (float(stats[9])/DAUPERVOLT ) * MICRONPERVOLT * 1000; // * 1000 to convert to nM from microns
+        int sCurrentADC = int(map(fCurrentADC,-20000,20000,10,height-10));
+        if (sCurrentADC < (height/2)) textAlign(RIGHT,BOTTOM);
+        else textAlign(RIGHT,TOP); 
+        point(xPos,constrain(height-sCurrentADC,1, height));
+        text(str(int(fCurrentADC)),xPos + textWidth(str(int(fCurrentADC)))+ 5,height - sCurrentADC);
+        textAlign(LEFT,BOTTOM);
+        text("A/D: ",5,140);
+        text(str(int(fCurrentADC)),50,140);
+      } 
+      
+      if (stats[10] != null) { 
+        diffADC = int(stats[10]);
+        
+      }
       
       image(kiwi,25,550,65,45.7);
       
@@ -433,7 +453,7 @@ void serialEvent(Serial port) {
       //fRegressionPoints[regressionPoints][0] = (2 * MAX_VOLT * float(cal[1])/MAX_DAU) + MIN_VOLT; // DAU
       fRegressionPoints[regressionPoints][1] = float(cal[2]); // FOCUS
       point(map(fRegressionPoints[regressionPoints][0],0,MAX_DAU,1,width), map(fRegressionPoints[regressionPoints][1],0,127,height,1));
-      text(str(truncate((float(cal[1]) * 2 * MAX_VOLT/MAX_DAU) + MIN_VOLT)) +", "+str(truncate(float(cal[2]))),map(fRegressionPoints[regressionPoints][0],0,MAX_DAU,1,width) + 10,map(fRegressionPoints[regressionPoints][1],0,127,height,1));
+      text(str(truncate(((float(cal[1]) * 2 * MAX_VOLT/MAX_DAU) + MIN_VOLT) * MICRONPERVOLT)) +" µM, "+str(truncate(float(cal[2]))) +" pixels",map(fRegressionPoints[regressionPoints][0],0,MAX_DAU,1,width) + 10,map(fRegressionPoints[regressionPoints][1],0,127,height,1));
       regressionPoints++; 
       if (regressionPoints >= REGRESSIONPOINTS) regressionPoints = REGRESSIONPOINTS - 1;
       println(inString);
@@ -460,7 +480,7 @@ void serialEvent(Serial port) {
       fill(255,0,0);
       textAlign(CENTER,CENTER);
       text(inString,width/2,height/2);
-      textSize(14);
+      textSize(12);
       if (nKey == 2) sendLetter('s');
     }
     else println(inString);
@@ -573,4 +593,9 @@ void handleButtonEvents(GButton button) {
       }
   }
 
+}
+
+// Calculates the base-10 logarithm of a number
+float log10 (float x) {
+  return (log(x) / log(10));
 }
