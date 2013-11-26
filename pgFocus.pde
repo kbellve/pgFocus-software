@@ -6,6 +6,9 @@ import processing.serial.*;
 
 static int REGRESSIONPOINTS = 31;
 static float MAX_DAU = 16384;
+static float MIN_DAU = 5000;
+static float MIDDLE_DAU = (MAX_DAU/2);
+static float FIVE_HUNDRED_NM = 82; // DAUPERVOLT/MICRONPERVOLT/2 = 81.9
 static float MAX_VOLT = 5;
 static float MIN_VOLT = -5;
 static int MICRONPERVOLT = 10;
@@ -15,7 +18,7 @@ static int ADC_TRIGGER = 5;
 
 
 String[] light,stats,cal; 
-float fExposure, fFocus,fSlope,fIntercept,fResiduals,fDAU;
+float fExposure = 0, fFocus = 0,fSlope = 0,fIntercept = 0,fResiduals = 0,fDAU = 0,fNewMark = 0, fOldMark = 0, fDiffMark = 0.0;
 float[][] fRegressionPoints = new float [REGRESSIONPOINTS][2];
 float[] focusPoints = new float[30];
 int diffADC = 0;
@@ -32,7 +35,7 @@ boolean bVerbose = false;
 boolean bFocus = false;
 Boolean clearGUI = true;    
 
-GButton guiFocus,guiDown,guiUp;
+GButton guiFocus,guiDown,guiUp,guiMark;
 
 void setup() {
   size(800,600);
@@ -44,36 +47,52 @@ void setup() {
   // softlink to /dev/ttyACM? to /dev/ttyS4
   println(Serial.list());
   
-  pgFocus = new Serial(this,Serial.list()[0],57600);
-  // don't generate a serialEvent() unless you get a newline character:  
-  
-  pgFocus.bufferUntil('\n'); 
- 
-  kiwi = loadImage("kiwi.png");
-  
-  textSize(12);
-  
-  
-  background(255);
-  
-  // buttons
-  guiFocus = new GButton (this,"Focus Off",5,160,90,20); 
-  guiFocus.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
-  guiFocus.fireAllEvents(false);
-  guiUp = new GButton (this,"UP",5,190,90,20); 
-  guiUp.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
-  guiUp.fireAllEvents(false);
-  guiDown = new GButton (this,"DOWN",5,220,90,20); 
-  guiDown.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
-  guiDown.fireAllEvents(false);
-  hideGUI();
- 
-  // stop everything
-  sendLetter('s');
- 
-  help();
-  
-  focusPointsMax = 0;
+  if (Serial.list().length == 0) 
+  {
+    println("Couldn't find a serial port");
+    println("Please make sure you have installed the Arduino Serial Driver");
+    exit();
+  }
+  else {
+    pgFocus = new Serial(this,Serial.list()[0],57600); 
+
+    // don't generate a serialEvent() unless you get a newline character:  
+    
+    pgFocus.bufferUntil('\n'); 
+   
+    kiwi = loadImage("kiwi.png");
+    
+    textSize(12);
+    
+    
+    background(255);
+    
+    // buttons
+    guiFocus = new GButton (this,"Focus Off",5,180,90,20); 
+    guiFocus.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
+    guiFocus.fireAllEvents(false);
+    
+    guiUp = new GButton (this,"UP",5,210,90,20); 
+    guiUp.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
+    guiUp.fireAllEvents(false);
+    
+    guiDown = new GButton (this,"DOWN",5,240,90,20); 
+    guiDown.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
+    guiDown.fireAllEvents(false);
+    
+    guiMark = new GButton (this,"Mark",5,270,90,20); 
+    guiMark.setTextAlign( GAlign.CENTER | GAlign.MIDDLE);
+    guiMark.fireAllEvents(false);
+    
+    hideGUI();
+   
+    // stop everything
+    sendLetter('s');
+   
+    help();
+    
+    focusPointsMax = 0;
+  }
   
 }
 
@@ -84,6 +103,9 @@ void hideGUI() {
   guiUp.setEnabled(false); 
   guiDown.setVisible(false);
   guiDown.setEnabled(false); 
+  guiMark.setVisible(false);
+  guiMark.setEnabled(false); 
+  
 }
 
 void showGUI() {
@@ -93,6 +115,9 @@ void showGUI() {
   guiUp.setEnabled(true); 
   guiDown.setVisible(true);
   guiDown.setEnabled(true); 
+  guiMark.setVisible(true);
+  guiMark.setEnabled(true); 
+  
 }
 
 void help() {
@@ -120,6 +145,8 @@ void help() {
   text("Activate pgFocus: ",width/2-150,300); text("f",width/2 + 100,300);
   text("Adjust Focus Up: ",width/2 -150,325);text("u",width/2 + 100,325);
   text("Adjust Focus Down: ",width/2 -150,350);text("d",width/2 + 100,350);
+  
+  text("Mark Position: ",width/2 -150,400);text("m",width/2 + 100,400);
  
   textAlign(CENTER,TOP);
   textSize(10);
@@ -161,7 +188,7 @@ void draw() {
     if (light != null) {
       lastxVal = 0; lastyVal = 0;
       for (int x = 2; x < light.length; x++) {  
-        // convert to an int and map to the screen height:
+        // convert to an float and map to the screen height:
         yVal = float(light[x]);
         yVal = map(yVal, 0, 1023, 0, height);
         xVal = map(x-2, 0, 127, 0, width);
@@ -177,7 +204,7 @@ void draw() {
   if (nKey == 2) {
     strokeWeight(2);
     
-    if (stats != null && stats.length == 11) {
+    if (stats != null) {
       //println (stats);
       fill(255);
       noStroke();
@@ -195,119 +222,136 @@ void draw() {
       showGUI();
       
       // draw stats 6 and stats 7 first so that other lines can write on top
-      if (stats[6] != null) {
-        stroke(0,0,255);
-        fill(0,0,255);
-
-        fFocus = float(stats[6]);
-        focusPoints[focusPointsIndex++] = fFocus;
-        if (focusPointsMax < 30) focusPointsMax++;
-        if (focusPointsIndex == 30) focusPointsIndex = 0;
-               
-        fFocus = map(fFocus,20,108,10,height-10);
+      if (stats.length > 7) {
+        if (stats[6] != null) {
+          stroke(0,0,255);
+          fill(0,0,255);
+  
+          fFocus = float(stats[6]);
+          float ftempFocus = fFocus;
+          focusPoints[focusPointsIndex++] = fFocus;
+          if (focusPointsMax < 30) focusPointsMax++;
+          if (focusPointsIndex == 30) focusPointsIndex = 0;
+                 
+          ftempFocus = map(fFocus,20,108,10,height-10);
+          
+          textAlign(RIGHT,BOTTOM);
+          text(str(truncate(float(stats[6]))),xPos + textWidth(str(truncate(float(stats[6]))))+ 5,height - ftempFocus );
+          textAlign(LEFT,BOTTOM);
+          text("Focus: " ,5,60);
+          text(str(truncate(float(stats[6]))),50,60);
+          
+          
+        //}
         
-        textAlign(RIGHT,BOTTOM);
-        text(str(truncate(float(stats[6]))),xPos + textWidth(str(truncate(float(stats[6]))))+ 5,height - fFocus );
-        textAlign(LEFT,BOTTOM);
-        text("Focus: " ,5,60);
-        text(str(truncate(float(stats[6]))),50,60);
-        
-        
-      //}
-      
-      //if (stats[7] != null) {
-        float fSD = (standard_deviation(focusPoints,focusPointsMax) * fDAU/DAUPERVOLT ) * MICRONPERVOLT * 1000; // convert to nanometers from DAU
-        float sd = log(fSD);
-        if (abs(diffADC) > ADC_TRIGGER || bFocus == false) stroke(160,160,215);
-        else stroke(200,200,255);
-        sd = map(sd,0,50,1,height/2);
-        line(xPos,height-fFocus+sd,xPos,height-fFocus-sd);
-        stroke(0,0,255);
-        point(xPos,height - fFocus);
-        fill(0,0,0);
-        textAlign(LEFT,BOTTOM);
-        text("SD: " ,5,100);
-        text(str(truncate(fSD)),50,100);
+        //if (stats[7] != null) {
+          float fSD = (standard_deviation(focusPoints,focusPointsMax) * fDAU/DAUPERVOLT ) * MICRONPERVOLT * 1000; // convert to nanometers from DAU
+          float sd = sqrt(fSD);
+          if (abs(diffADC) > ADC_TRIGGER || bFocus == false) stroke(160,160,215);
+          else stroke(200,200,255);
+          sd = map(sd,0,100,1,height/2);
+          line(xPos,height-ftempFocus+sd,xPos,height-ftempFocus-sd);
+          stroke(0,0,255);
+          point(xPos,height - ftempFocus);
+          fill(0,0,0);
+          textAlign(LEFT,BOTTOM);
+          text("SD: " ,5,100);
+          text(str(truncate(fSD)),50,100);
+        }
       }
       
-      
-      if (stats[3] != null) {
-        stroke(255,0,0);
-        fill(255,0,0);
-        nMin = int(stats[3]);
-        nMin = int(map(nMin,0,1023,10,height-10));
-        point(xPos,height - nMin);
-        if (nMin < 500) textAlign(RIGHT,BOTTOM);
-        else textAlign(RIGHT,TOP);
-        text(stats[3],xPos + textWidth(stats[3]) + 5,height - nMin );
-        textAlign(LEFT,BOTTOM);
-        text("Min: ",5,40);
-        text(stats[3],50,40);
-      } 
-     
-      if (stats[4] != null) {
-        stroke(255,0,0);
-        fill(255,0,0);      
-        nMax = int(stats[4]);
-        nMax = int(map(nMax,0,1023,10,height-10));
-        point(xPos,height - nMax);
-        if (nMax > 500) textAlign(RIGHT,TOP);
-        else textAlign(RIGHT,BOTTOM);
-        text(stats[4],xPos + textWidth(stats[4]) + 5,height - nMax );
-        textAlign(LEFT,BOTTOM);
-        text("Max: ",5,20);
-        text(stats[4],50,20);
+      if (stats.length > 3) {
+        if (stats[3] != null) {
+          stroke(255,0,0);
+          fill(255,0,0);
+          nMin = int(stats[3]);
+          nMin = int(map(nMin,0,1023,10,height-10));
+          point(xPos,height - nMin);
+          if (nMin < 500) textAlign(RIGHT,BOTTOM);
+          else textAlign(RIGHT,TOP);
+          text(stats[3],xPos + textWidth(stats[3]) + 5,height - nMin );
+          textAlign(LEFT,BOTTOM);
+          text("Min: ",5,40);
+          text(stats[3],50,40);
+        } 
       }
      
-      if (stats[5] != null) {
-        stroke(0,128,0);
-        fill(0,128,0);
-        float Voltage = float(stats[5]) * (10 / MAX_DAU) - 5;
-        int sVoltage = int(map(truncate(Voltage),-5,+5,1,height));
-        point(xPos,height - sVoltage);
-        textAlign(RIGHT,BOTTOM);
-        text(str(int(Voltage * MICRONPERVOLT * 1000)),xPos + textWidth(str(int(Voltage * MICRONPERVOLT * 1000))) + 5,height - sVoltage);  // * 1000 to convert to nM
-        textAlign(LEFT,BOTTOM);
-        text("D/A: ",5,80);
-        text(str(int(Voltage * MICRONPERVOLT * 1000)),50,80); // * 1000 to convert to nM
-      }
-      
-      
-      if (stats[7] != null) {
-        fDAU = float(stats[7]);
+      if (stats.length > 4 ){
+        if (stats[4] != null) {
+          stroke(255,0,0);
+          fill(255,0,0);      
+          nMax = int(stats[4]);
+          nMax = int(map(nMax,0,1023,10,height-10));
+          point(xPos,height - nMax);
+          if (nMax > 500) textAlign(RIGHT,TOP);
+          else textAlign(RIGHT,BOTTOM);
+          text(stats[4],xPos + textWidth(stats[4]) + 5,height - nMax );
+          textAlign(LEFT,BOTTOM);
+          text("Max: ",5,20);
+          text(stats[4],50,20);
+        }
       }
      
-      if (stats[8] != null) {        
-        stroke(128,0,128);
-        fill(128,0,128);
-        fExposure = float(stats[8]);
-        fExposure = map(fExposure,1000,10000,10,height-10);
-        if (fExposure < (height/2)) textAlign(RIGHT,BOTTOM);
-        else textAlign(RIGHT,TOP); 
-        point(xPos,constrain(height-fExposure,1, height));
-        text(stats[8],xPos + textWidth(stats[8])+ 5,height - fExposure);
-        textAlign(LEFT,BOTTOM);
-        text("Exp: ",5,120);
-        text(stats[8],50,120);
-      } 
+      if (stats.length > 5) {
+        if (stats[5] != null) {
+          stroke(0,128,0);
+          fill(0,128,0);
+          float Voltage = float(stats[5]) * (10 / MAX_DAU) - 5;
+          int sVoltage = int(map(truncate(Voltage),-5,+5,1,height));
+          point(xPos,height - sVoltage);
+          textAlign(RIGHT,BOTTOM);
+          text(str(int(Voltage * MICRONPERVOLT * 1000)),xPos + textWidth(str(int(Voltage * MICRONPERVOLT * 1000))) + 5,height - sVoltage);  // * 1000 to convert to nM
+          textAlign(LEFT,BOTTOM);
+          text("D/A: ",5,80);
+          text(str(int(Voltage * MICRONPERVOLT * 1000)),50,80); // * 1000 to convert to nM
+        }
+      }
       
-      if (stats[9] != null) {        
-        stroke(128,128,128);
-        fill(128,128,128);
-        float fCurrentADC = (float(stats[9])/DAUPERVOLT ) * MICRONPERVOLT * 1000; // * 1000 to convert to nM from microns
-        int sCurrentADC = int(map(fCurrentADC,-20000,20000,10,height-10));
-        if (sCurrentADC < (height/2)) textAlign(RIGHT,BOTTOM);
-        else textAlign(RIGHT,TOP); 
-        point(xPos,constrain(height-sCurrentADC,1, height));
-        text(str(int(fCurrentADC)),xPos + textWidth(str(int(fCurrentADC)))+ 5,height - sCurrentADC);
-        textAlign(LEFT,BOTTOM);
-        text("A/D: ",5,140);
-        text(str(int(fCurrentADC)),50,140);
-      } 
+      if (stats.length > 7) {
+        if (stats[7] != null) {
+          fDAU = float(stats[7]); 
+          textAlign(LEFT,BOTTOM);
+          text("Mark: ", 5, 160);
+          text(str(int(truncate(fDiffMark))), 50, 160);
+        }
+      }
+     
+      if (stats.length > 8) {
+        if (stats[8] != null) {        
+          stroke(128,0,128);
+          fill(128,0,128);
+          fExposure = float(stats[8]);
+          fExposure = map(fExposure,1000,10000,10,height-10);
+          if (fExposure < (height/2)) textAlign(RIGHT,BOTTOM);
+          else textAlign(RIGHT,TOP); 
+          point(xPos,constrain(height-fExposure,1, height));
+          text(stats[8],xPos + textWidth(stats[8])+ 5,height - fExposure);
+          textAlign(LEFT,BOTTOM);
+          text("Exp: ",5,120);
+          text(stats[8],50,120);
+        } 
+      }
       
-      if (stats[10] != null) { 
-        diffADC = int(stats[10]);
-        
+      if (stats.length > 9) {
+        if (stats[9] != null) {        
+          stroke(128,128,128);
+          fill(128,128,128);
+          float fCurrentADC = (float(stats[9])/DAUPERVOLT ) * MICRONPERVOLT * 1000; // * 1000 to convert to nM from microns
+          int sCurrentADC = int(map(fCurrentADC,-20000,20000,10,height-10));
+          if (sCurrentADC < (height/2)) textAlign(RIGHT,BOTTOM);
+          else textAlign(RIGHT,TOP); 
+          point(xPos,constrain(height-sCurrentADC,1, height));
+          text(str(int(fCurrentADC)),xPos + textWidth(str(int(fCurrentADC)))+ 5,height - sCurrentADC);
+          textAlign(LEFT,BOTTOM);
+          text("A/D: ",5,140);
+          text(str(int(fCurrentADC)),50,140);
+        } 
+      }
+      
+      if (stats.length > 10) {
+        if (stats[10] != null) { 
+          diffADC = int(stats[10]);
+        }
       }
       
       image(kiwi,25,550,65,45.7);
@@ -363,6 +407,7 @@ void keyPressed() {
     nKey = 3;
     background(255);
     strokeWeight(2);
+    textSize(12);
     text("Calibrating...",20,20);  
     sendLetter('c');
     break;
@@ -393,7 +438,8 @@ void keyPressed() {
     break; 
 
   case 'm':
-    sendLetter('m');
+    //sendLetter('m');
+    mark();
     break;
   case 'o':
     sendLetter('s');
@@ -452,8 +498,8 @@ void serialEvent(Serial port) {
       fRegressionPoints[regressionPoints][0] = float(cal[1]);
       //fRegressionPoints[regressionPoints][0] = (2 * MAX_VOLT * float(cal[1])/MAX_DAU) + MIN_VOLT; // DAU
       fRegressionPoints[regressionPoints][1] = float(cal[2]); // FOCUS
-      point(map(fRegressionPoints[regressionPoints][0],0,MAX_DAU,1,width), map(fRegressionPoints[regressionPoints][1],0,127,height,1));
-      text(str(truncate(((float(cal[1]) * 2 * MAX_VOLT/MAX_DAU) + MIN_VOLT) * MICRONPERVOLT)) +" µM, "+str(truncate(float(cal[2]))) +" pixels",map(fRegressionPoints[regressionPoints][0],0,MAX_DAU,1,width) + 10,map(fRegressionPoints[regressionPoints][1],0,127,height,1));
+      point(map(fRegressionPoints[regressionPoints][0],0,(MAX_DAU - 1),1,width), map(fRegressionPoints[regressionPoints][1],20,107,height,1));
+      text(str(truncate(((float(cal[1]) * 2 * MAX_VOLT/MAX_DAU) + MIN_VOLT) * MICRONPERVOLT)) +" µM, "+str(truncate(float(cal[2]))) +" pixels",map(fRegressionPoints[regressionPoints][0],0,(MAX_DAU - 1),1,width) + 10,map(fRegressionPoints[regressionPoints][1],20,107,height,1));
       regressionPoints++; 
       if (regressionPoints >= REGRESSIONPOINTS) regressionPoints = REGRESSIONPOINTS - 1;
       println(inString);
@@ -514,15 +560,16 @@ void serialEvent(Serial port) {
         
         fill(255);
         noStroke();
-        rect(10,10,textWidth("Calibrating..."),20); // Clear text
+        textSize(12);
+        rect(20,20,textWidth("Calibrating..."),20); // Clear text
         //rect(10,height-100,80,height-50);
         stroke(255,0,0);
         strokeWeight(2); 
         
         float X1 = map(fRegressionPoints[0][0],0,MAX_DAU,1,width);
         float X2 = map(fRegressionPoints[regressionPoints-1][0],0,MAX_DAU,1,width);
-        float Y1 = map((fSlope*fRegressionPoints[0][0])+fIntercept,0,127,height,1);
-        float Y2 = map((fSlope*fRegressionPoints[regressionPoints-1][0])+fIntercept,0,127,height,1);
+        float Y1 = map((fSlope*fRegressionPoints[0][0])+fIntercept,20,107,height,1);
+        float Y2 = map((fSlope*fRegressionPoints[regressionPoints-1][0])+fIntercept,20,107,height,1);
         line(X1,Y1,X2,Y2);
         fill(255,0,0);
         text("DAU: " + str(fDAU),10,height-120);
@@ -533,6 +580,23 @@ void serialEvent(Serial port) {
       }
     }
   }
+}
+
+void mark() {
+   
+  if (fFocus > 0) {
+    
+    fNewMark = fFocus * (fDAU / DAUPERVOLT ) * MICRONPERVOLT * 1000; // convert to nM
+   
+    if (fOldMark == 0.0) fDiffMark = 0;
+    else fDiffMark = fNewMark - fOldMark;
+    
+    println("Focus: " + fFocus+"nM");
+    println("New Mark: " + truncate(fNewMark)+"nM");
+    println("Old Mark: " + truncate(fOldMark)+"nM");
+    println("Difference: " + truncate(fDiffMark)+"nM"); 
+    fOldMark = fNewMark; 
+  } 
 }
 
 float truncate(float x){
@@ -562,7 +626,6 @@ float standard_deviation(float data[], int n) {
 }
 
 
-
 void handleButtonEvents(GButton button) {
    
   if (button == guiFocus) {
@@ -583,7 +646,7 @@ void handleButtonEvents(GButton button) {
         println("Unknown mouse event");
       }
   }
-    if (button == guiDown) {
+  if (button == guiDown) {
     switch(button.eventType){
       case GButton.CLICKED:
         sendLetter('d');
@@ -592,10 +655,15 @@ void handleButtonEvents(GButton button) {
         println("Unknown mouse event");
       }
   }
+  if (button == guiMark) {
+    switch(button.eventType){
+      case GButton.CLICKED:
+        mark();
+        break;
+      default:
+        println("Unknown mouse event");
+      }
+  }
 
 }
 
-// Calculates the base-10 logarithm of a number
-float log10 (float x) {
-  return (log(x) / log(10));
-}
