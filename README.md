@@ -9,3 +9,7 @@ To use this software, you will need to install Processing 2 available from proce
 
 https://processing.org/download/?processing
 
+Use Processing 2.03 rather than Processing 2.1 since the latter dropped a few functions from the serial library.
+
+You might also need to download and install G4P ( http://sourceforge.net/projects/g4p/files/?source=navbar )
+

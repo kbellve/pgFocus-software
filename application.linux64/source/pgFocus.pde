@@ -6,6 +6,10 @@ import processing.serial.*;
 // Karl Bellve
 // Biomedical Imaging Group
 
+// set this to select the serial port to use (0 index)
+int serialPort = 0;
+Serial pgFocus;         // The serial port object
+
 static int REGRESSIONPOINTS = 31;
 static float MAX_DAU = 16384;
 static float MIN_DAU = 5000;
@@ -30,7 +34,7 @@ int regressionPoints = 0;
 int nMin, nMax;
 int nKey = 0;
 boolean bSwitch = false;
-Serial pgFocus;         // The serial port object
+
 int xPos = 110;          // horizontal position of the graph
 PImage kiwi;
 boolean bVerbose = false;
@@ -38,6 +42,7 @@ boolean bFocus = false;
 Boolean clearGUI = true;    
 
 GButton guiFocus,guiDown,guiUp,guiMark;
+GDropList guiSerial;
 
 void setup() {
   size(800,600);
@@ -47,7 +52,7 @@ void setup() {
   
   // big issue with processing. Arduino virtual ports are not recognized by Processing
   // softlink to /dev/ttyACM? to /dev/ttyS4
-  println(Serial.list());
+
   
   if (Serial.list().length == 0) 
   {
@@ -56,21 +61,11 @@ void setup() {
     exit();
   }
   else {
-    for (int x = 0; x < Serial.list().length; x++) {
-      println("Found Serial Port: " +  Serial.list()[x]);
-    }
-    println("Using Serial Port: " +  Serial.list()[0]);
-    
-    pgFocus = new Serial(this,Serial.list()[0],57600); 
 
-    // don't generate a serialEvent() unless you get a newline character:  
     
-    pgFocus.bufferUntil('\n'); 
-   
     kiwi = loadImage("kiwi.png");
     
     textSize(12);
-    
     
     background(255);
     
@@ -91,6 +86,9 @@ void setup() {
     guiMark.setTextAlign( GAlign.CENTER, GAlign.MIDDLE);
     guiMark.fireAllEvents(false);
     
+    guiSerial = new GDropList(this, width/2 + 100,400, 125,40,Serial.list().length);
+    guiSerial.setItems(Serial.list(),serialPort);
+    
     hideGUI();
    
     // stop everything
@@ -103,6 +101,7 @@ void setup() {
   
 }
 
+
 void hideGUI() {
   guiFocus.setVisible(false);
   guiFocus.setEnabled(false); 
@@ -112,6 +111,11 @@ void hideGUI() {
   guiDown.setEnabled(false); 
   guiMark.setVisible(false);
   guiMark.setEnabled(false); 
+  
+  if (nKey != 0) {
+    guiSerial.setVisible(false);
+    guiSerial.setEnabled(false);
+  }
   
 }
 
@@ -149,21 +153,31 @@ void help() {
   text("Show running output: ",width/2 -150,225);text("v",width/2 + 100,225);
   text("Save screen as tif file: ",width/2 -150,250);text("s",width/2 + 100,250);
  
-  text("Activate pgFocus: ",width/2-150,300); text("f",width/2 + 100,300);
-  text("Adjust Focus Up: ",width/2 -150,325);text("u",width/2 + 100,325);
-  text("Adjust Focus Down: ",width/2 -150,350);text("d",width/2 + 100,350);
+  text("Activate pgFocus: ",width/2-150,275); text("f",width/2 + 100,275);
+  text("Adjust Focus Up: ",width/2 -150,300);text("u",width/2 + 100,300);
+  text("Adjust Focus Down: ",width/2 -150,325);text("d",width/2 + 100,325);
   
-  text("Mark Position: ",width/2 -150,400);text("m",width/2 + 100,400);
+  text("Mark Position: ",width/2 -150,350);text("m",width/2 + 100,350);
+  
+  text("Use Serial Port: ",width/2 -150,400);
+  if (pgFocus != null) {
+    pgFocus.clear();
+    pgFocus.stop();
+    pgFocus = null;
+  }
  
-  textAlign(CENTER,TOP);
-  textSize(10);
-  text("This software uses the first serial port, but Proccessing doesn't scan Arduino virtual serial ports.",width/2,450);
-  text("A softlink must be created between the Arduino virtual serial port and a non existing serial port.",width/2,470);
-  text("This is handled by the script pgFocus.bash and is started when the computer starts.",width/2,490);
-  textAlign(LEFT,TOP);
-  text("Biomedical Imaging Group",width * 3/4,540);
-  text("University of Massachusetts",width * 3/4,555);
-  text("http://big.umassmed.edu",width * 3/4,570);
+  guiSerial.setVisible(true);
+  guiSerial.setEnabled(true);
+ 
+  //textAlign(CENTER,TOP);
+  //textSize(10);
+  //text("This software uses the first serial port, but Proccessing doesn't scan Arduino virtual serial ports.",width/2,450);
+  //text("A softlink must be created between the Arduino virtual serial port and a non existing serial port.",width/2,470);
+  //text("This is handled by the script pgFocus.bash and is started when the computer starts.",width/2,490);
+  //textAlign(LEFT,TOP);
+  text("Biomedical Imaging Group",width * 3/4,535);
+  text("University of Massachusetts",width * 3/4,550);
+  text("http://big.umassmed.edu",width * 3/4,565);
   
   //scale(.1);
   image(kiwi,20,550,60,45.7);
@@ -185,9 +199,19 @@ void draw() {
     guiFocus.setLocalColorScheme(GCScheme.BLUE_SCHEME);
     guiFocus.setText("Focus OFF");  
   }  
-    
+  
+   
+  
+  // Help window
+  if (nKey == 0) {
+    help();
+  }
+  
+  // Light Profile
   if (nKey == 1) {
     hideGUI();
+
+    
     clearGUI = true;
     strokeWeight(2);
     background (255);
@@ -208,6 +232,7 @@ void draw() {
     }
   }
   
+  // Stats
   if (nKey == 2) {
     strokeWeight(2);
     
@@ -388,12 +413,19 @@ void draw() {
 
 void sendLetter(char letter)
 {
+  if (pgFocus == null) 
+  {
+    // try and open the default port
+    if (selectSerial(serialPort) == false) return;
+  }
+  
   int nOldKey = nKey;
   nKey = 0; 
   delay(25); // time for draw() to stop
   pgFocus.write(letter);
   delay(25);
   nKey = nOldKey;
+
 }
 
 void keyPressed() {
@@ -632,6 +664,48 @@ float standard_deviation(float data[], int n) {
   return sqrt(sum_deviation/n);
 }
 
+boolean selectSerial(int serialPort) {
+
+  println("selecting port: " + serialPort);
+  if (Serial.list().length == 0) 
+  {
+    println("Couldn't find a serial port");
+    println("Please make sure you have installed the Arduino Serial Driver");
+    return false;
+  }
+  else {
+    println(Serial.list());
+    
+    if (serialPort > Serial.list().length) {
+      println("Serial port doesn't exist");
+      return false;
+    } else println("Using Serial Port: " +  Serial.list()[serialPort]); 
+    
+    if (pgFocus != null) {
+      pgFocus.clear();
+      pgFocus.stop();
+      pgFocus = null;
+    }
+    pgFocus = new Serial(this,Serial.list()[serialPort],57600); 
+    
+    pgFocus.bufferUntil('\n'); 
+  }
+  
+  return true;
+  
+}
+
+void handleDropListEvents(GDropList list, GEvent event) {
+  
+  if (list == guiSerial) {
+    serialPort = list.getSelectedIndex();
+    println("Using port" + list.getSelectedText()); 
+    selectSerial(serialPort);
+  }
+  
+
+  //if (nKey == 0) help();    
+}
 
 void handleButtonEvents(GButton button, GEvent event) {
    
