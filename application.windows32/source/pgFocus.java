@@ -105,7 +105,8 @@ public void setup() {
     guiMark.setTextAlign( GAlign.CENTER, GAlign.MIDDLE);
     guiMark.fireAllEvents(false);
     
-    guiSerial = new GDropList(this, width/2 + 100,400, 125,40,Serial.list().length);
+    //guiSerial = new GDropList(this, width/2 + 100,400, 125,45,Serial.list().length);
+    guiSerial = new GDropList(this, width/2 + 100,400, 125,45,3);
     guiSerial.setItems(Serial.list(),serialPort);
     
     hideGUI();
@@ -148,6 +149,10 @@ public void showGUI() {
   guiMark.setVisible(true);
   guiMark.setEnabled(true); 
   
+  if (nKey != 0) {
+    guiSerial.setVisible(false);
+    guiSerial.setEnabled(false);
+  }
 }
 
 public void help() {
@@ -178,7 +183,7 @@ public void help() {
   
   text("Mark Position: ",width/2 -150,350);text("m",width/2 + 100,350);
   
-  text("Use Serial Port: ",width/2 -150,400);
+  text("Serial Port: ",width/2 -150,400);
   if (pgFocus != null) {
     pgFocus.clear();
     pgFocus.stop();
@@ -229,8 +234,7 @@ public void draw() {
   // Light Profile
   if (nKey == 1) {
     hideGUI();
-
-    
+ 
     clearGUI = true;
     strokeWeight(2);
     background (255);
@@ -256,7 +260,6 @@ public void draw() {
     strokeWeight(2);
     
     if (stats != null) {
-      //println (stats);
       fill(255);
       noStroke();
       if (clearGUI == true) {
@@ -269,7 +272,7 @@ public void draw() {
       rect(0,0,100,height); 
       stroke(0,0,0);
       line(100,0, 100, height);
-      //guiFocus.draw();
+      
       showGUI();
       
       // draw stats 6 and stats 7 first so that other lines can write on top
@@ -417,8 +420,6 @@ public void draw() {
   
   if (nKey == 3) {
     hideGUI();
-    //for (int x = 0; x < regressionPoints; x++)
-    //  point(map(fRegressionPoints[regressionPoints][0],0,MAX_DAU,width,1), map(fRegressionPoints[regressionPoints][1],0,127,height, 1));
   }
   if (nKey == 1) {
     pgFocus.write('l');
@@ -457,12 +458,13 @@ public void keyPressed() {
     sendLetter('b');
     break;
   case 'c':
+    nKey = 3;
     regressionPoints = 0;
     fResiduals = 0;
     fSlope = 0;
     fIntercept = 0;
     hideGUI();
-    nKey = 3;
+
     background(255);
     strokeWeight(2);
     textSize(12);
@@ -516,7 +518,10 @@ public void keyPressed() {
       nKey = 0;
     }
     else {
-      if (nKey == 1) background(255);
+      if (nKey != 2) {
+        background(255);
+        clearGUI = true;
+      }
       nKey = 2;
       sendLetter('v');
     }
@@ -533,7 +538,9 @@ public void keyPressed() {
 // Called whenever there is something available to read
 public void serialEvent(Serial port) {
   
-  String inString = pgFocus.readStringUntil('\n');
+  //String inString = pgFocus.readStringUntil('\n');
+  // This is a workaround for Processing 2.1 forgetting to include readStringUntil()
+  String inString = new String(port.readBytesUntil('\n'));
   String[] arrayString;
   
   if (inString != null) {
@@ -545,7 +552,7 @@ public void serialEvent(Serial port) {
       //println(inString);  
     } else if (arrayString[0].equals("STATS:")) {      // Stats
       stats = arrayString; 
-      //println(inString);
+      println(inString);
     } else if (arrayString[0].equals("CAL:")) {      // Calibration
       //println("Found calibration");
       strokeWeight(8);
@@ -588,8 +595,6 @@ public void serialEvent(Serial port) {
       if (nKey == 2) sendLetter('s');
     }
     else println(inString);
-    
-  
   }
   
   if (regressionPoints > 0) {
@@ -615,7 +620,7 @@ public void serialEvent(Serial port) {
           fResiduals += fResiduals + sq(fRegressionPoints[x][1] - fSlope * fRegressionPoints[x][0] - fIntercept);
         }
         fResiduals = 1 - (fResiduals/fMeanError);
-        
+
         fill(255);
         noStroke();
         textSize(12);
@@ -634,7 +639,7 @@ public void serialEvent(Serial port) {
         text("Slope: " + str(fSlope),10,height-100);
         text("Intercept: " + str(fIntercept),10,height-80);
         text("Residuals: " + str(fResiduals),10,height-60);
-        nKey = 0;
+        //nKey = 0;
       }
     }
   }
