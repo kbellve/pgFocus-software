@@ -46,6 +46,7 @@ String[] light,stats,cal;
 float fExposure = 0, fFocus = 0,fSlope = 0,fIntercept = 0,fResiduals = 0,fDAU = 0,fNewMark = 0, fOldMark = 0, fDiffMark = 0.0f;
 float[][] fRegressionPoints = new float [REGRESSIONPOINTS][2];
 float[] focusPoints = new float[30];
+float fVersion = 0.0f;
 int diffADC = 0;
 int focusPointsIndex = 0;
 int focusPointsMax = 0;
@@ -114,6 +115,12 @@ public void setup() {
     // stop everything
     sendLetter('s');
    
+    // Get identity
+    sendLetter('i');
+   
+    // Get version
+    sendString("version");
+    
     help();
     
     focusPointsMax = 0;
@@ -182,6 +189,7 @@ public void help() {
   text("Adjust Focus Down: ",width/2 -150,325);text("d",width/2 + 100,325);
   
   text("Mark Position: ",width/2 -150,350);text("m",width/2 + 100,350);
+ 
   
   text("Serial Port: ",width/2 -150,400);
   if (pgFocus != null) {
@@ -199,6 +207,8 @@ public void help() {
   //text("A softlink must be created between the Arduino virtual serial port and a non existing serial port.",width/2,470);
   //text("This is handled by the script pgFocus.bash and is started when the computer starts.",width/2,490);
   //textAlign(LEFT,TOP);
+  text("Firmware: ",width/2 -150,450);text(fVersion,width/2 + 100,450);
+  
   text("Biomedical Imaging Group",width * 3/4,535);
   text("University of Massachusetts",width * 3/4,550);
   text("http://big.umassmed.edu",width * 3/4,565);
@@ -423,9 +433,12 @@ public void draw() {
   }
   if (nKey == 1) {
     pgFocus.write('l');
+    pgFocus.write('\r');
     delay(200); 
   }
   else if (nKey == 2) {
+    pgFocus.write('v');
+    pgFocus.write('\r');
     delay(200); 
   }
   
@@ -443,10 +456,30 @@ public void sendLetter(char letter)
   nKey = 0; 
   delay(25); // time for draw() to stop
   pgFocus.write(letter);
+  pgFocus.write('\r');
   delay(25);
   nKey = nOldKey;
 
 }
+
+public void sendString(String text)
+{
+  if (pgFocus == null) 
+  {
+    // try and open the default port
+    if (selectSerial(serialPort) == false) return;
+  }
+  
+  int nOldKey = nKey;
+  nKey = 0; 
+  delay(25); // time for draw() to stop
+  pgFocus.write(text);
+  pgFocus.write('\r');
+  delay(25);
+  nKey = nOldKey;
+
+}
+
 
 public void keyPressed() {
   
@@ -586,6 +619,9 @@ public void serialEvent(Serial port) {
     } else if (arrayString[0].equals("DAU:")) { 
       fDAU = PApplet.parseFloat(arrayString[1]);
       println(inString);
+    } else if (arrayString[0].equals("VERSION:")) { 
+      fVersion = PApplet.parseFloat(arrayString[1]);
+      println(inString);
     } else if (arrayString[0].equals("ERROR:")) {
       textSize(20);
       fill(255,0,0);
@@ -685,7 +721,8 @@ public float standard_deviation(float data[], int n) {
     sum_deviation+=(data[i]-mean)*(data[i]-mean);
   }
   
-  return sqrt(sum_deviation/n);
+  return sqrt(sum_deviation/(n -1)); // for sampled data
+  //return sqrt(sum_deviation/n); // for complete data
 }
 
 public boolean selectSerial(int serialPort) {
