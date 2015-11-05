@@ -8,6 +8,7 @@ import processing.serial.*;
 
 // set this to select the serial port to use (0 index)
 int serialPort = 0;
+String serialPortName = "NULL";
 Serial pgFocus;         // The serial port object
 
 static int REGRESSIONPOINTS = 31;
@@ -22,7 +23,7 @@ static int DAUPERVOLT = 1638; // 14bit over 10V
 //static int DAUPERVOLT = 1241; // 12bit over 3.3V
 static int ADC_TRIGGER = 5;
 
-
+String[] preferences = {"Serial Port","NULL"};
 String[] light,stats,cal; 
 float fExposure = 0, fFocus = 0,fSlope = 0,fIntercept = 0,fResiduals = 0,fDAU = 0,fNewMark = 0, fOldMark = 0, fDiffMark = 0.0;
 float[][] fRegressionPoints = new float [REGRESSIONPOINTS][2];
@@ -52,8 +53,7 @@ void setup() {
   G4P.setGlobalColorScheme(GCScheme.BLUE_SCHEME);
   
   // big issue with processing. Arduino virtual ports are not recognized by Processing
-  // softlink to /dev/ttyACM? to /dev/ttyS4
-
+  // softlink to /dev/ttyACM? to /dev/ttyS4 
   
   if (Serial.list().length == 0) 
   {
@@ -63,6 +63,17 @@ void setup() {
   }
   else {
 
+    preferences = loadStrings(".pgFocus");
+    if (preferences != null) {
+      serialPortName = preferences[1];
+      if (serialPortName.equals("NULL") == false) {
+        for (int x = 0; x < Serial.list().length; x++) {
+          if (serialPortName.equals(Serial.list()[x]) == true) {
+            serialPort = x; 
+          }
+        }
+      }
+    }
     
     kiwi = loadImage("kiwi.png");
     
@@ -433,13 +444,15 @@ void sendLetter(char letter)
     if (selectSerial(serialPort) == false) return;
   }
   
-  int nOldKey = nKey;
-  nKey = 0; 
-  delay(25); // time for draw() to stop
-  pgFocus.write(letter);
-  pgFocus.write('\r');
-  delay(25);
-  nKey = nOldKey;
+  if (pgFocus.available() > 0) {
+    int nOldKey = nKey;
+    nKey = 0; 
+    delay(25); // time for draw() to stop
+    pgFocus.write(letter);
+    pgFocus.write('\r');
+    delay(25);
+    nKey = nOldKey;
+  }
 
 }
 
@@ -524,6 +537,9 @@ void keyPressed() {
   case 's':
     save("pgFocus.tif"); 
     break;  
+  case 't':
+    sendLetter('t');
+    break;
   case 'u': // Move Focus Up
     sendLetter('u');
     break;
@@ -597,19 +613,20 @@ void serialEvent(Serial port) {
     } else if (arrayString[0].equals("RESIDUALS:")) { 
       fResiduals = float(arrayString[1]);
       println(inString);
-    } else if (arrayString[0].equals("DAU:")) { 
+    } else if (arrayString[0].equals("SLOPE:")) { 
       fDAU = float(arrayString[1]);
       println(inString);
     } else if (arrayString[0].equals("VERSION:")) { 
       fVersion = float(arrayString[1]);
       println(inString);
     } else if (arrayString[0].equals("ERROR:")) {
-      textSize(20);
-      fill(255,0,0);
-      textAlign(CENTER,CENTER);
-      text(inString,width/2,height/2);
-      textSize(12);
-      if (nKey == 2) sendLetter('s');
+      //textSize(20);
+      //fill(255,0,0);
+      //textAlign(CENTER,CENTER);
+      //text(inString,width/2,height/2);
+      //textSize(12);
+      println(inString);
+      //if (nKey == 2) sendLetter('s');
     }
     else println(inString);
   }
@@ -728,9 +745,15 @@ boolean selectSerial(int serialPort) {
       pgFocus.stop();
       pgFocus = null;
     }
+    
     pgFocus = new Serial(this,Serial.list()[serialPort],57600); 
     
-    pgFocus.bufferUntil('\n'); 
+    if (pgFocus.available() >0) pgFocus.bufferUntil('\n'); 
+    
+    preferences = new String[2];
+    preferences[0] = "Serial Port";
+    preferences[1] = Serial.list()[serialPort];
+    saveStrings(".pgFocus", preferences);
   }
   
   return true;
@@ -741,7 +764,8 @@ void handleDropListEvents(GDropList list, GEvent event) {
   
   if (list == guiSerial) {
     serialPort = list.getSelectedIndex();
-    println("Using port" + list.getSelectedText()); 
+    println("Using port" + list.getSelectedText());
+    saveStrings(".pgFocus",preferences); 
     selectSerial(serialPort);
   }
   
