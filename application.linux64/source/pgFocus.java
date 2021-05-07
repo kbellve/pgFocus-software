@@ -47,7 +47,7 @@ String[] light,stats,cal;
 float fExposure = 0, fFocus = 0,fSlope = 0,fIntercept = 0,fResiduals = 0,fDAU = 0,fNewMark = 0, fOldMark = 0, fDiffMark = 0.0f;
 float[][] fRegressionPoints = new float [REGRESSIONPOINTS][2];
 float[] focusPoints = new float[30];
-float fVersion = 0.0f;
+float fVersion = 0.1f;
 int diffADC = 0;
 int focusPointsIndex = 0;
 int focusPointsMax = 0;
@@ -65,8 +65,16 @@ Boolean clearGUI = true;
 GButton guiFocus,guiDown,guiUp,guiMark;
 GDropList guiSerial;
 
+public void settings() {
+  
+  kiwi = loadImage("kiwi.png");
+  
+  size(800,600); //needed here, rather tha in setpo() for Processing 3.5?
+}
+
 public void setup() {
-  size(800,600);
+  surface.setResizable(true);
+  //size(800,600);
   // BLUE_SCHEME, GREEN_SCHEME, RED_SCHEME, GREY_SCHEME
   // YELLOW_SCHEME, CYAN_SCHEME, PURPLE_SCHEME
   G4P.setGlobalColorScheme(GCScheme.BLUE_SCHEME);
@@ -94,7 +102,7 @@ public void setup() {
       }
     }
     
-    kiwi = loadImage("kiwi.png");
+    //kiwi = loadImage("kiwi.png");
     
     textSize(12);
     
@@ -457,21 +465,22 @@ public void draw() {
 
 public void sendLetter(char letter)
 {
+  
   if (pgFocus == null) 
   {
     // try and open the default port
     if (selectSerial(serialPort) == false) return;
   }
   
-  if (pgFocus.available() > 0) {
-    int nOldKey = nKey;
-    nKey = 0; 
-    delay(25); // time for draw() to stop
-    pgFocus.write(letter);
-    pgFocus.write('\r');
-    delay(25);
-    nKey = nOldKey;
-  }
+ 
+  int nOldKey = nKey;
+  nKey = 0; 
+  delay(25); // time for draw() to stop
+  pgFocus.write(letter);
+  pgFocus.write('\r');
+  delay(25);
+  nKey = nOldKey;
+
 
 }
 
@@ -587,114 +596,118 @@ public void keyPressed() {
 // Called whenever there is something available to read
 public void serialEvent(Serial port) {
   
-  //String inString = pgFocus.readStringUntil('\n');
-  // This is a workaround for Processing 2.1 forgetting to include readStringUntil()
-  String inString = new String(port.readBytesUntil('\n'));
-  String[] arrayString;
-  
-  if (inString != null) {
-    // trim off any whitespace:
-    inString = trim(inString);
-    arrayString = split(inString," ");
-    if (arrayString[0].equals("LIGHT:")) {             // Light profile
-      light = arrayString;
-      //println(inString);  
-    } else if (arrayString[0].equals("STATS:")) {      // Stats
-      stats = arrayString; 
-      println(inString);
-    } else if (arrayString[0].equals("CAL:")) {      // Calibration
-      //println("Found calibration");
-      strokeWeight(8);
-      stroke(255,0,0);
-      fill(255,0,0);
-      textAlign(LEFT,CENTER);
-      cal = arrayString;
-      fRegressionPoints[regressionPoints][0] = PApplet.parseFloat(cal[1]);
-      //fRegressionPoints[regressionPoints][0] = (2 * MAX_VOLT * float(cal[1])/MAX_DAU) + MIN_VOLT; // DAU
-      fRegressionPoints[regressionPoints][1] = PApplet.parseFloat(cal[2]); // FOCUS
-      point(map(fRegressionPoints[regressionPoints][0],0,(MAX_DAU - 1),1,width), map(fRegressionPoints[regressionPoints][1],20,107,height,1));
-      text(str(truncate(((PApplet.parseFloat(cal[1]) * 2 * MAX_VOLT/MAX_DAU) + MIN_VOLT) * MICRONPERVOLT)) +" \u00b5M, "+str(truncate(PApplet.parseFloat(cal[2]))) +" pixels",map(fRegressionPoints[regressionPoints][0],0,(MAX_DAU - 1),1,width) + 10,map(fRegressionPoints[regressionPoints][1],20,107,height,1));
-      regressionPoints++; 
-      if (regressionPoints >= REGRESSIONPOINTS) regressionPoints = REGRESSIONPOINTS - 1;
-      println(inString);
-    } else if (inString.equals("INFO: Focus OFF")) { 
-      bFocus = false; 
-     //println(inString);
-    } else if (inString.equals("INFO: Focus ON")) { 
-      bFocus = true; 
-      //println(inString);
-    } else if (arrayString[0].equals("SLOPE:")) { 
-      fSlope = PApplet.parseFloat(arrayString[1]);
-      println(inString);
-    } else if (arrayString[0].equals("INTERCEPT:")) { 
-      fIntercept = PApplet.parseFloat(arrayString[1]);
-      println(inString);
-    } else if (arrayString[0].equals("RESIDUALS:")) { 
-      fResiduals = PApplet.parseFloat(arrayString[1]);
-      println(inString);
-    } else if (arrayString[0].equals("SLOPE:")) { 
-      fDAU = PApplet.parseFloat(arrayString[1]);
-      println(inString);
-    } else if (arrayString[0].equals("VERSION:")) { 
-      fVersion = PApplet.parseFloat(arrayString[1]);
-      println(inString);
-    } else if (arrayString[0].equals("ERROR:")) {
-      //textSize(20);
-      //fill(255,0,0);
-      //textAlign(CENTER,CENTER);
-      //text(inString,width/2,height/2);
-      //textSize(12);
-      println(inString);
-      //if (nKey == 2) sendLetter('s');
-    }
-    else println(inString);
-  }
-  
-  if (regressionPoints > 0) {
-    // Did we get these values from the hardware? If so, lets recompute them due to the fact that the hardware can't compute the residuals accurately
-    // since it swaps the variables to avoid overflow
-    if (fIntercept != 0 && fSlope != 0 && fResiduals != 0) {
-      if (nKey == 3) {    
-        float fDet, fSumX = 0.0f, fSumXX = 0.0f, fSumY = 0.0f, fSumXY = 0.0f, fMeanError = 0.0f;
-        for (int x = 0; x < regressionPoints; x++) {
-           fSumX  += fRegressionPoints[x][0];
-           fSumXX += fRegressionPoints[x][0] * fRegressionPoints[x][0];
-           fSumXY += fRegressionPoints[x][0] * fRegressionPoints[x][1];
-           fSumY  += fRegressionPoints[x][1];
-        }
-        fDet = (regressionPoints * fSumXX - fSumX * fSumX);
-        fSlope = (regressionPoints * fSumXY - fSumX * fSumY) / fDet;
-        fIntercept = (fSumXX * fSumY - fSumX * fSumXY)/ fDet;    
-        
-        fResiduals = 0.0f; // clear the residuals from the pgFocus Hardware
-        fMeanError = 0.0f;
-        for (int x = 0; x < regressionPoints; x++) {
-          fMeanError += fMeanError + sq(fRegressionPoints[x][1] - fSumY/regressionPoints);
-          fResiduals += fResiduals + sq(fRegressionPoints[x][1] - fSlope * fRegressionPoints[x][0] - fIntercept);
-        }
-        fResiduals = 1 - (fResiduals/fMeanError);
-
-        fill(255);
-        noStroke();
-        textSize(12);
-        rect(20,20,textWidth("Calibrating..."),20); // Clear text
-        //rect(10,height-100,80,height-50);
+  try {
+    //String inString = pgFocus.readStringUntil('\n');
+    // This is a workaround for Processing 2.1 forgetting to include readStringUntil()
+    String inString = new String(port.readBytesUntil('\n'));
+    String[] arrayString;
+    
+    if (inString != null) {
+      // trim off any whitespace:
+      inString = trim(inString);
+      arrayString = split(inString," ");
+      if (arrayString[0].equals("LIGHT:")) {             // Light profile
+        light = arrayString;
+        //println(inString);  
+      } else if (arrayString[0].equals("STATS:")) {      // Stats
+        stats = arrayString; 
+        println(inString);
+      } else if (arrayString[0].equals("CAL:")) {      // Calibration
+        //println("Found calibration");
+        strokeWeight(8);
         stroke(255,0,0);
-        strokeWeight(2); 
-        
-        float X1 = map(fRegressionPoints[0][0],0,MAX_DAU,1,width);
-        float X2 = map(fRegressionPoints[regressionPoints-1][0],0,MAX_DAU,1,width);
-        float Y1 = map((fSlope*fRegressionPoints[0][0])+fIntercept,20,107,height,1);
-        float Y2 = map((fSlope*fRegressionPoints[regressionPoints-1][0])+fIntercept,20,107,height,1);
-        line(X1,Y1,X2,Y2);
         fill(255,0,0);
-        text("DAU: " + str(fDAU),10,height-120);
-        text("Slope: " + str(fSlope),10,height-100);
-        text("Intercept: " + str(fIntercept),10,height-80);
-        text("Residuals: " + str(fResiduals),10,height-60);
-        //nKey = 0;
+        textAlign(LEFT,CENTER);
+        cal = arrayString;
+        fRegressionPoints[regressionPoints][0] = PApplet.parseFloat(cal[1]);
+        //fRegressionPoints[regressionPoints][0] = (2 * MAX_VOLT * float(cal[1])/MAX_DAU) + MIN_VOLT; // DAU
+        fRegressionPoints[regressionPoints][1] = PApplet.parseFloat(cal[2]); // FOCUS
+        point(map(fRegressionPoints[regressionPoints][0],0,(MAX_DAU - 1),1,width), map(fRegressionPoints[regressionPoints][1],20,107,height,1));
+        text(str(truncate(((PApplet.parseFloat(cal[1]) * 2 * MAX_VOLT/MAX_DAU) + MIN_VOLT) * MICRONPERVOLT)) +" µM, "+str(truncate(PApplet.parseFloat(cal[2]))) +" pixels",map(fRegressionPoints[regressionPoints][0],0,(MAX_DAU - 1),1,width) + 10,map(fRegressionPoints[regressionPoints][1],20,107,height,1));
+        regressionPoints++; 
+        if (regressionPoints >= REGRESSIONPOINTS) regressionPoints = REGRESSIONPOINTS - 1;
+        println(inString);
+      } else if (inString.equals("INFO: Focus OFF")) { 
+        bFocus = false; 
+        println(inString);
+      } else if (inString.equals("INFO: Focus ON")) { 
+        bFocus = true; 
+        println(inString);
+      } else if (arrayString[0].equals("SLOPE:")) { 
+        fSlope = PApplet.parseFloat(arrayString[1]);
+        println(inString);
+      } else if (arrayString[0].equals("INTERCEPT:")) { 
+        fIntercept = PApplet.parseFloat(arrayString[1]);
+        println(inString);
+      } else if (arrayString[0].equals("RESIDUALS:")) { 
+        fResiduals = PApplet.parseFloat(arrayString[1]);
+        println(inString);
+      } else if (arrayString[0].equals("SLOPE:")) { 
+        fDAU = PApplet.parseFloat(arrayString[1]);
+        println(inString);
+      } else if (arrayString[0].equals("VERSION:")) { 
+        fVersion = PApplet.parseFloat(arrayString[1]);
+        println(inString);
+      } else if (arrayString[0].equals("ERROR:")) {
+        //textSize(20);
+        //fill(255,0,0);
+        //textAlign(CENTER,CENTER);
+        //text(inString,width/2,height/2);
+        //textSize(12);
+        println(inString);
+        //if (nKey == 2) sendLetter('s');
+      }
+      else println(inString);
+    }
+    
+    if (regressionPoints > 0) {
+      // Did we get these values from the hardware? If so, lets recompute them due to the fact that the hardware can't compute the residuals accurately
+      // since it swaps the variables to avoid overflow
+      if (fIntercept != 0 && fSlope != 0 && fResiduals != 0) {
+        if (nKey == 3) {    
+          float fDet, fSumX = 0.0f, fSumXX = 0.0f, fSumY = 0.0f, fSumXY = 0.0f, fMeanError = 0.0f;
+          for (int x = 0; x < regressionPoints; x++) {
+             fSumX  += fRegressionPoints[x][0];
+             fSumXX += fRegressionPoints[x][0] * fRegressionPoints[x][0];
+             fSumXY += fRegressionPoints[x][0] * fRegressionPoints[x][1];
+             fSumY  += fRegressionPoints[x][1];
+          }
+          fDet = (regressionPoints * fSumXX - fSumX * fSumX);
+          fSlope = (regressionPoints * fSumXY - fSumX * fSumY) / fDet;
+          fIntercept = (fSumXX * fSumY - fSumX * fSumXY)/ fDet;    
+          
+          fResiduals = 0.0f; // clear the residuals from the pgFocus Hardware
+          fMeanError = 0.0f;
+          for (int x = 0; x < regressionPoints; x++) {
+            fMeanError += fMeanError + sq(fRegressionPoints[x][1] - fSumY/regressionPoints);
+            fResiduals += fResiduals + sq(fRegressionPoints[x][1] - fSlope * fRegressionPoints[x][0] - fIntercept);
+          }
+          fResiduals = 1 - (fResiduals/fMeanError);
+  
+          fill(255);
+          noStroke();
+          textSize(12);
+          rect(20,20,textWidth("Calibrating..."),20); // Clear text
+          //rect(10,height-100,80,height-50);
+          stroke(255,0,0);
+          strokeWeight(2); 
+          
+          float X1 = map(fRegressionPoints[0][0],0,MAX_DAU,1,width);
+          float X2 = map(fRegressionPoints[regressionPoints-1][0],0,MAX_DAU,1,width);
+          float Y1 = map((fSlope*fRegressionPoints[0][0])+fIntercept,20,107,height,1);
+          float Y2 = map((fSlope*fRegressionPoints[regressionPoints-1][0])+fIntercept,20,107,height,1);
+          line(X1,Y1,X2,Y2);
+          fill(255,0,0);
+          text("DAU: " + str(fDAU),10,height-120);
+          text("Slope: " + str(fSlope),10,height-100);
+          text("Intercept: " + str(fIntercept),10,height-80);
+          text("Residuals: " + str(fResiduals),10,height-60);
+          //nKey = 0;
+        }
       }
     }
+  } catch (Exception e) {
+//    println("Initialization exception");
   }
 }
 
@@ -811,7 +824,6 @@ public void handleButtonEvents(GButton button, GEvent event) {
   }  
 
 }
-
   static public void main(String[] passedArgs) {
     String[] appletArgs = new String[] { "pgFocus" };
     if (passedArgs != null) {
